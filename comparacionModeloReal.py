@@ -1,104 +1,182 @@
+"""
+Simulación Computacional de Matemática Cardiovascular
+Modelo de Parámetros Concentrados (0D) - Efecto Windkessel
+
+Mentor: PhD. Andrés J. C. Vásquez
+Grupo: Semillero de Computación Científica - AppliScience
+
+Referencias Académicas:
+[1] Formaggia, L., Quarteroni, A., & Veneziani, A. (Eds.). (2009).
+    "Cardiovascular Mathematics: Modeling and simulation of the circulatory system".
+    Springer Science & Business Media.
+"""
 import matplotlib
 matplotlib.use('TkAgg')
-import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-
+import pandas as pd
 from scipy.integrate import solve_ivp
+import matplotlib.pyplot as plt
 from scipy.stats import pearsonr
 from sklearn.metrics import mean_squared_error
 
-R = 1.0
-L = 0.01
-C = 0.005
-P_ext = 80.0
+class SegmentoArterial0D:
+    """Clase que modela un vaso sanguíneo usando parámetros concentrados (0D)."""
 
-def flujo_entrada(t):
+    def __init__(self, R=1.0, L=0.01, C=1.70, P_ext=5.0):
+        # Parámetros físicos del vaso
+        self.R = R          # Resistencia viscosa
+        self.L = L          # Inercia del fluido
+        self.C = C          # Distensibilidad de la pared (Capacitancia)
+        self.P_ext = P_ext  # Presión de salida o lecho capilar
 
-    if (t % 1) < 0.3:
-        return 20 * np.sin(2 * np.pi * t)**2
+    def flujo_entrada(self, t):
+        """Simula un perfil de flujo pulsátil (sístole y diástole)."""
+        if (t % 1) < 0.3:  # Fase sistólica (aprox 30% del ciclo cardíaco)
+            return 20 * np.sin(2 * np.pi * t)**2
+        return 0.0         # Fase diastólica
 
-    return 0.0
+    def sistema_dae(self, t, y):
+        """Define el sistema de ecuaciones diferencial-algebraicas (DAE)."""
+        P1, Qout = y  # Extraemos los valores actuales de Presión y Flujo
+        Qin = self.flujo_entrada(t) # Calculamos cuánto flujo entra en este instante 't'
 
-def sistema(t, y):
+        # =====================================================================
+        # AQUÍ ESTÁN LAS ECUACIONES DIFERENCIALES EXPLÍCITAS (DAE):
+        # =====================================================================
 
-    P, Q = y
+        # 1. Ecuación de Conservación de Masa (Cambio de Presión en el tiempo)
+        # Físicamente: dP/dt depende de la diferencia entre el flujo de entrada y salida,
+        # amortiguada por la elasticidad de la arteria (Capacitancia C).
+        dP1_dt = (Qin - Qout) / self.C
 
-    Qin = flujo_entrada(t)
+        # 2. Ecuación de Balance de Cantidad de Movimiento (Cambio de Flujo en el tiempo)
+        # Físicamente: dQ/dt es impulsada por el gradiente de presión y frenada
+        # por la resistencia viscosa (R), dependiendo de la inercia de la sangre (Inductancia L).
+        dQout_dt = (P1 - self.R * Qout - self.P_ext) / self.L
 
-    dP_dt = (Qin - Q) / C
+        # =====================================================================
 
-    dQ_dt = (P - R*Q - P_ext) / L
+        # Retornamos las derivadas al integrador numérico (solve_ivp)
+        return [dP1_dt, dQout_dt]
 
-    return [dP_dt, dQ_dt]
+    def simular(self, t_span, y0, t_eval):
+        """Resuelve el sistema utilizando el integrador de SciPy (Runge-Kutta 45)."""
+        return solve_ivp(self.sistema_dae, t_span, y0, t_eval=t_eval, method='RK45')
 
-t_eval = np.linspace(0, 3, 1000)
+# --- Bloque de Ejecución Principal para Google Colab ---
+if __name__ == "__main__":
+    # Instanciamos un segmento (ej. aorta) con valores representativos
+    aorta = SegmentoArterial0D(R=0.8, L=0.015, C=0.008, P_ext=80.0)
 
-sol = solve_ivp(
-    sistema,
-    [0, 3],
-    [90, 0],
-    t_eval=t_eval
-)
+    # Configuración del tiempo de simulación y condiciones iniciales
+    tiempo_total = 3.0 # segundos (simularemos 3 ciclos cardíacos aprox)
+    t_eval = np.linspace(0, tiempo_total, 1000)
+    condiciones_iniciales = [90.0, 0.0] # [Presión inicial (P1), Flujo de salida inicial (Qout)]
 
-t_modelo = sol.t
-P_modelo = sol.y[0]
+    # Ejecución del solver numérico
+    solucion = aorta.simular([0, tiempo_total], condiciones_iniciales, t_eval)
 
-df = pd.read_csv(
-    "presion_real.csv",
-    sep=';',
-    decimal=',',
-    header=None,
-    names=["tiempo", "presion"]
-)
+    # =====================================================================
+    # AQUÍ ESTÁ LA PARTE DE COMPARACIÓN CON UNA IMAGEN REAL:
+    # =====================================================================
+    # Señal del modelo
+    t_modelo = solucion.t
+    P_modelo = solucion.y[0]
 
-df = df.sort_values("tiempo")
+    # ---------------------------------------------
+    # CARGAR SEÑAL REAL
+    # ---------------------------------------------
 
-t_real = df["tiempo"].values
-P_real = df["presion"].values
+    df = pd.read_csv(
+        "presion_real.csv",
+        sep=';',
+        decimal=',',
+        header=None,
+        names=["tiempo", "presion"]
+    )
+    df = df.sort_values("tiempo")
+    df = df.drop_duplicates()
 
-P_real_interp = np.interp(
-    t_modelo,
-    t_real,
-    P_real
-)
+    # Extraer arrays
+    t_real = df["tiempo"].values
+    P_real = df["presion"].values
 
-mse = mean_squared_error(
-    P_real_interp,
-    P_modelo
-)
+    # ---------------------------------------------
+    # INTERPOLAR LA SEÑAL REAL
+    # ---------------------------------------------
 
-corr, _ = pearsonr(
-    P_real_interp,
-    P_modelo
-)
+    # Esto hace que ambas señales tengan
+    # exactamente los mismos tiempos.
 
-print("MSE =", mse)
-print("Correlación =", corr)
+    P_real_interp = np.interp(
+        t_modelo,
+        t_real,
+        P_real
+    )
 
-plt.figure(figsize=(10,5))
+    # ---------------------------------------------
+    # COMPARACIÓN MATEMÁTICA
+    # ---------------------------------------------
 
-plt.plot(
-    t_modelo,
-    P_modelo,
-    label="Modelo Windkessel",
-    linewidth=2,
-    color='#b30000'
-)
+    # Error cuadrático medio
+    mse = mean_squared_error(
+        P_real_interp,
+        P_modelo
+    )
 
-plt.plot(
-    t_modelo,
-    P_real_interp,
-    '--',
-    label="Registro real",
-)
+    # Correlación
+    corr, _ = pearsonr(
+        P_real_interp,
+        P_modelo
+    )
 
-plt.xlabel("Tiempo (s)")
-plt.ylabel("Presión (mmHg)")
+    # ---------------------------------------------
+    # RESULTADOS NUMÉRICOS
+    # ---------------------------------------------
 
-plt.title("Comparación Modelo vs Registro Real")
+    print("\n===== RESULTADOS =====")
 
-plt.legend()
-plt.grid(True)
+    print(f"MSE = {mse:.4f}")
 
-plt.show()
+    print(f"Correlación = {corr:.4f}")
+
+
+    # ---------------------------------------------
+    # VISUALIZACIÓN
+    # ---------------------------------------------
+
+    plt.figure(figsize=(12,6))
+    # Señal del modelo
+    plt.plot(
+        t_modelo,
+        P_modelo,
+        label='Modelo Windkessel 0D',
+        linewidth=2,
+        color='darkred'
+    )
+
+    # Señal real
+    plt.plot(
+        t_modelo,
+        P_real_interp,
+        '--',
+        label='Registro fisiológico real',
+        linewidth=2,
+        color='navy'
+    )
+
+    plt.title(
+        'Comparación entre Modelo Matemático y Señal Real',
+        fontsize=14
+    )
+
+    plt.xlabel('Tiempo (s)', fontsize=12)
+
+    plt.ylabel('Presión arterial (mmHg)', fontsize=12)
+
+    plt.grid(True, linestyle='--', alpha=0.7)
+
+    plt.legend()
+
+    # Mostrar gráfica
+    plt.show()
