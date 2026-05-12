@@ -10,8 +10,6 @@ Referencias Académicas:
     "Cardiovascular Mathematics: Modeling and simulation of the circulatory system".
     Springer Science & Business Media.
 """
-import matplotlib
-matplotlib.use('TkAgg')
 import numpy as np
 import pandas as pd
 from scipy.integrate import solve_ivp
@@ -179,4 +177,5 @@ if __name__ == "__main__":
     plt.legend()
 
     # Mostrar gráfica
+    plt.tight_layout()
     plt.show()
